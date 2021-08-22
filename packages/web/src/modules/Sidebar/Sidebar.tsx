@@ -142,16 +142,6 @@ function Sidebar() {
                         />,
                     )}
                     {renderTooltip(
-                        '打赏',
-                        <IconButton
-                            width={40}
-                            height={40}
-                            icon="dashang"
-                            iconSize={26}
-                            onClick={() => toggleRewardDialogVisible(true)}
-                        />,
-                    )}
-                    {renderTooltip(
                         '关于',
                         <IconButton
                             width={40}
