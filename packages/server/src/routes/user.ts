@@ -466,6 +466,7 @@ export async function changePassword(
  * @param ctx Context
  */
 export async function changeUsername(ctx: Context<{ username: string }>) {
+    assert('', '玩家ID不可以被修改！');
     const { username } = ctx.data;
     assert(username, '新用户名不能为空');
 
