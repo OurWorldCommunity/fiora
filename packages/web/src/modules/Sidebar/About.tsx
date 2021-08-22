@@ -40,16 +40,6 @@ function About(props: AboutProps) {
                     </a>
                 </div>
                 <div className={Common.block}>
-                    <p className={Common.title}>隐私条款</p>
-                    <a
-                        href="/PrivacyPolicy.html"
-                        target="_black"
-                        rel="noopener noreferrer"
-                    >
-                        {`${window.location.origin}/PrivacyPolicy.html`}
-                    </a>
-                </div>
-                <div className={Common.block}>
                     <p className={Common.title}>将fiora安装到主屏(PWA)</p>
                     <ul>
                         <li>
@@ -75,6 +65,15 @@ function About(props: AboutProps) {
                 <div className={Common.block}>
                     <p className={Common.title}>友情链接</p>
                     <ul>
+                        <li>
+                            <a
+                                href="https://blog.smyhw.online/"
+                                target="_black"
+                                rel="noopener noreferrer"
+                            >
+                                smyhw
+                            </a>
+                        </li>
                         <li>
                             <a
                                 href="https://wangyaxing.cn/"
