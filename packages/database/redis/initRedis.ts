@@ -78,3 +78,6 @@ export const Redis = {
     Hour,
     Day,
 };
+
+export const DisableSendMessageKey = 'DisableSendMessage';
+export const DisableNewUserSendMessageKey = 'DisableNewUserSendMessageKey';

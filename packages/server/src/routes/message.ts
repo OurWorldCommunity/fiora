@@ -19,6 +19,11 @@ import History, {
 } from '@fiora/database/mongoose/models/history';
 import Socket from '@fiora/database/mongoose/models/socket';
 
+import {
+    DisableSendMessageKey,
+    DisableNewUserSendMessageKey,
+    Redis,
+} from '@fiora/database/redis/initRedis';
 import client from '../../../config/client';
 
 const { isValid } = Types.ObjectId;
@@ -27,6 +32,8 @@ const { isValid } = Types.ObjectId;
 const FirstTimeMessagesCount = 15;
 /** 每次调用接口获取的历史消息数 */
 const EachFetchMessagesCount = 30;
+
+const OneYear = 365 * 24 * 3600 * 1000;
 
 /** 石头剪刀布, 用于随机生成结果 */
 const RPS = ['石头', '剪刀', '布'];
@@ -55,16 +62,14 @@ async function pushNotification(
         try {
             const results = await expo.sendPushNotificationsAsync(chunk);
             results.forEach((result) => {
-                const {
-                    status,
-                    message: errMessage,
-                } = result as ExpoPushErrorTicket;
+                const { status, message: errMessage } =
+                    result as ExpoPushErrorTicket;
                 if (status === 'error') {
                     logger.warn('[Notification]', errMessage);
                 }
             });
         } catch (error) {
-            logger.error('[Notification]', error.message);
+            logger.error('[Notification]', (error as Error).message);
         }
     }
 }
@@ -76,6 +81,22 @@ async function pushNotification(
  * @param ctx Context
  */
 export async function sendMessage(ctx: Context<SendMessageData>) {
+    const disableSendMessage = await Redis.get(DisableSendMessageKey);
+    assert(disableSendMessage !== 'true' || ctx.socket.isAdmin, '全员禁言中');
+
+    const disableNewUserSendMessage = await Redis.get(
+        DisableNewUserSendMessageKey,
+    );
+    if (disableNewUserSendMessage === 'true') {
+        const user = await User.findById(ctx.socket.user);
+        const isNewUser =
+            user && user.createTime.getTime() > Date.now() - OneYear;
+        assert(
+            ctx.socket.isAdmin || !isNewUser,
+            '新用户禁言中! 主群禁止闲聊, 多交流fiora和开发技术, 自发维护交流环境',
+        );
+    }
+
     const { to, content } = ctx.data;
     let { type } = ctx.data;
     assert(to, 'to不能为空');
@@ -187,7 +208,7 @@ export async function sendMessage(ctx: Context<SendMessageData>) {
         if (notificationTokens.length) {
             pushNotification(
                 notificationTokens,
-                (messageData as unknown) as MessageDocument,
+                messageData as unknown as MessageDocument,
                 toGroup.name,
             );
         }
@@ -209,7 +230,7 @@ export async function sendMessage(ctx: Context<SendMessageData>) {
         if (notificationTokens.length) {
             pushNotification(
                 notificationTokens.map(({ token }) => token),
-                (messageData as unknown) as MessageDocument,
+                messageData as unknown as MessageDocument,
             );
         }
     }
@@ -237,6 +258,7 @@ export async function getLinkmansLastMessages(
                 content: 1,
                 from: 1,
                 createTime: 1,
+                deleted: 1,
             },
             { sort: { createTime: -1 }, limit: FirstTimeMessagesCount },
         ).populate('from', { username: 1, avatar: 1, tag: 1 });
@@ -282,6 +304,7 @@ export async function getLinkmansLastMessagesV2(
                     content: 1,
                     from: 1,
                     createTime: 1,
+                    deleted: 1,
                 },
                 {
                     sort: { createTime: -1 },
@@ -340,6 +363,7 @@ export async function getLinkmanHistoryMessages(
             content: 1,
             from: 1,
             createTime: 1,
+            deleted: 1,
         },
         {
             sort: { createTime: -1 },
@@ -371,6 +395,7 @@ export async function getDefaultGroupHistoryMessages(
             content: 1,
             from: 1,
             createTime: 1,
+            deleted: 1,
         },
         {
             sort: { createTime: -1 },
@@ -382,22 +407,17 @@ export async function getDefaultGroupHistoryMessages(
     return result;
 }
 
-interface DeleteMessageData {
-    /** 消息id */
-    messageId: string;
-}
-
 /**
  * 删除消息, 需要管理员权限
  */
 export async function deleteMessage(ctx: Context<{ messageId: string }>) {
-    const { messageId } = ctx.data;
-    assert(messageId, 'messageId不能为空');
-
     assert(
         !client.disableDeleteMessage || ctx.socket.isAdmin,
         '已禁止撤回消息',
     );
+
+    const { messageId } = ctx.data;
+    assert(messageId, 'messageId不能为空');
 
     const message = await Message.findOne({ _id: messageId });
     if (!message) {
@@ -409,8 +429,12 @@ export async function deleteMessage(ctx: Context<{ messageId: string }>) {
         '只能撤回本人的消息',
     );
 
-    await Message.deleteOne({ _id: message._id });
-    await History.deleteMany({ message: message._id });
+    if (ctx.socket.isAdmin) {
+        await Message.deleteOne({ _id: messageId });
+    } else {
+        message.deleted = true;
+        await message.save();
+    }
 
     /**
      * 广播删除消息通知, 区分群消息和私聊消息
@@ -419,6 +443,7 @@ export async function deleteMessage(ctx: Context<{ messageId: string }>) {
     const messageData = {
         linkmanId: message.to.toString(),
         messageId,
+        isAdmin: ctx.socket.isAdmin,
     };
     if (isValid(message.to)) {
         // 群消息

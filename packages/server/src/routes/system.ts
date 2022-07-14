@@ -17,6 +17,8 @@ import {
     getAllSealUser,
     getSealIpKey,
     getSealUserKey,
+    DisableSendMessageKey,
+    DisableNewUserSendMessageKey,
     Redis,
 } from '@fiora/database/redis/initRedis';
 
@@ -188,6 +190,7 @@ export async function sealIp(ctx: Context<{ ip: string }>) {
     const { ip } = ctx.data;
     assert(ip !== '::1' && ip !== '127.0.0.1', CantSealLocalIp);
     assert(ip !== ctx.socket.ip, CantSealSelf);
+
     const isSealIp = await Redis.has(getSealIpKey(ip));
     assert(!isSealIp, IpInSealList);
 
@@ -204,10 +207,19 @@ export async function sealIp(ctx: Context<{ ip: string }>) {
 export async function sealUserOnlineIp(ctx: Context<{ userId: string }>) {
     const { userId } = ctx.data;
 
+    const user = await User.findOne({ _id: userId });
+    assert(user, '用户不存在');
     const sockets = await Socket.find({ user: userId });
-    assert(sockets.length > 0, '该用户不在线, 没有IP信息');
-
-    const ipList = sockets.map((socket) => socket.ip);
+    const ipList = [
+        ...sockets.map((socket) => socket.ip),
+        user.lastLoginIp,
+    ].filter(
+        (ip) =>
+            ip !== '' &&
+            ip !== '::1' &&
+            ip !== '127.0.0.1' &&
+            ip !== ctx.socket.ip,
+    );
 
     // 如果全部 ip 都已经封禁过了, 则直接提示
     const isSealIpList = await Promise.all(
@@ -215,25 +227,11 @@ export async function sealUserOnlineIp(ctx: Context<{ userId: string }>) {
     );
     assert(!isSealIpList.every((isSealIp) => isSealIp), IpInSealList);
 
-    let errorMessage = '';
     await Promise.all(
         ipList.map(async (ip) => {
-            if (ip === '::1' || ip === '127.0.0.1') {
-                errorMessage = CantSealLocalIp;
-            } else if (ip === ctx.socket.ip) {
-                errorMessage = CantSealSelf;
-            } else {
-                const isSealIp = await Redis.has(getSealIpKey(ip));
-                if (!isSealIp) {
-                    await Redis.set(getSealIpKey(ip), ip, Redis.Hour * 6);
-                }
-            }
+            await Redis.set(getSealIpKey(ip), ip, Redis.Hour * 6);
         }),
     );
-
-    if (errorMessage) {
-        return errorMessage;
-    }
 
     return {
         msg: 'ok',
@@ -279,7 +277,8 @@ export async function getSTS(): Promise<STSResult> {
             ...result.credentials,
         };
     } catch (err) {
-        assert.fail(`获取 STS 失败 - ${err.message}`);
+        const typedErr = err as Error;
+        assert.fail(`获取 STS 失败 - ${typedErr.message}`);
     }
 }
 
@@ -324,7 +323,34 @@ export async function uploadFile(
             url: `/${ctx.data.fileName}`,
         };
     } catch (err) {
-        logger.error('[uploadFile]', err.message);
-        return `上传文件失败:${err.message}`;
+        const typedErr = err as Error;
+        logger.error('[uploadFile]', typedErr.message);
+        return `上传文件失败:${typedErr.message}`;
     }
+}
+
+export async function toggleSendMessage(ctx: Context<{ enable: boolean }>) {
+    const { enable } = ctx.data;
+    await Redis.set(DisableSendMessageKey, (!enable).toString());
+    return {
+        msg: 'ok',
+    };
+}
+
+export async function toggleNewUserSendMessage(
+    ctx: Context<{ enable: boolean }>,
+) {
+    const { enable } = ctx.data;
+    await Redis.set(DisableNewUserSendMessageKey, (!enable).toString());
+    return {
+        msg: 'ok',
+    };
+}
+
+export async function getSystemConfig() {
+    return {
+        disableSendMessage: (await Redis.get(DisableSendMessageKey)) === 'true',
+        disableNewUserSendMessage:
+            (await Redis.get(DisableNewUserSendMessageKey)) === 'true',
+    };
 }

@@ -115,9 +115,10 @@ export async function register(
             salt,
             password: hash,
             avatar: getRandomAvatar(),
+            lastLoginIp: ctx.socket.ip,
         } as UserDocument);
     } catch (err) {
-        if (err.name === 'ValidationError') {
+        if ((err as Error).name === 'ValidationError') {
             return '用户名包含不支持的字符或者长度超过限制';
         }
         throw err;
@@ -187,6 +188,7 @@ export async function login(
     await handleNewUser(user);
 
     user.lastLoginTime = new Date();
+    user.lastLoginIp = ctx.socket.ip;
     await user.save();
 
     const groups = await Group.find(
@@ -273,6 +275,7 @@ export async function loginByToken(
     await handleNewUser(user);
 
     user.lastLoginTime = new Date();
+    user.lastLoginIp = ctx.socket.ip;
     await user.save();
 
     const groups = await Group.find(
@@ -357,6 +360,7 @@ export async function guest(ctx: Context<Environment>) {
             content: 1,
             from: 1,
             createTime: 1,
+            deleted: 1,
         },
         { sort: { createTime: -1 }, limit: 15 },
     ).populate('from', { username: 1, avatar: 1 });
